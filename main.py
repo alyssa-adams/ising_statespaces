@@ -4,6 +4,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import os
 import networkx as nx
 from itertools import repeat
 import pickle
@@ -19,6 +20,9 @@ nsteps = 1000
 min_size = 4
 max_size = 5
 trials = 100
+
+# make pickle_jar
+os.mkdir('pickle_jar')
 
 
 # ============= Step 1: run the ising model at some temperature for various sizes ==============
