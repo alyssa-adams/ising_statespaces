@@ -2,45 +2,25 @@
 # https://github.com/rajeshrinet/compPhy/blob/master/notebooks/2014/IsingModel.ipynb
 
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import os
 import networkx as nx
-from itertools import repeat
 import pickle
 from multiprocessing import Pool, freeze_support
-# --
-from functions import IsingModel
-
 
 # ============= Step 0: define the ising model parameters ==============
 
 temps = list(np.linspace(2, 3, num=8))
 nsteps = 1000
-min_size = 4
-max_size = 5
+min_size = 3
+max_size = 3
 trials = 100
 
-# make pickle_jar
-os.mkdir('pickle_jar')
 
+# ============= Step 2: Look at the networks and the trajectories ==============
 
-# ============= Step 1: run the ising model at some temperature for various sizes ==============
-
-def run_statespaces(temp, nsteps):
-
-    """
-    Runs the Ising model and saves the trajectory for each state space, and also the resulting state space topology.
-    Pickles the result to pickle_jar
-    :param temp: temperature for the ising model
-    :param nsteps: number of steps to run it
-    :return: Nothing, just saves to file
-    """
+# analyze the networks
+def process_graphs(temp):
 
     for size in range(min_size, max_size+1):
-
-        # initiate the class
-        ising_model = IsingModel()
 
         print('size: ' + str(size))
 
@@ -48,100 +28,108 @@ def run_statespaces(temp, nsteps):
 
             print(trial)
 
-            # run the model and get the state space evolutions for all state spaces
-            data = ising_model.simulate(size, temp, nsteps, show_plots=False)
+            # load in these pickle files
+            with open('pickle_jar/graphs_temp_%0.2f_size_%d_trial_%d.p' % (temp, size, trial), 'rb') as handle:
 
-            # for each state trajectory, make graph of transitions between states
-            graphs = {}
+                networks = pickle.load(handle)
 
-            for statespace in data:
+                results = {}
 
-                trajectory = data[statespace]
+                # for each toplogy, get the fraction of nodes that have more than one out degree
+                # also count the total number of bit flips for the whole trajectory
+                for network in networks:
 
-                # get the list of edges
-                edges = []
-                for e in range(nsteps-1):
-                    edge = (str(trajectory[e]), str(trajectory[e+1]))
-                    edges.append(edge)
+                    results[network] = {}
 
-                # turn into a graph
-                g = nx.MultiDiGraph()
-                g.add_edges_from(edges)
+                    # get the topology
+                    graph = networks[network][0]
 
-                # save to dict
-                # graphs[state space coord string] = [graph, list of states in trajectory]
-                graphs[statespace] = [g, list(trajectory.values())]
+                    # change multidigraph to digraph (remove self-loops and parallel edges)
+                    graph = nx.DiGraph(graph)
+                    graph.remove_edges_from(nx.selfloop_edges(graph))
 
-            # save to pickle file
-            with open('pickle_jar/graphs_temp_%0.2f_size_%d_trial_%d.p' % (temp, size, trial), 'wb') as handle:
-                pickle.dump(graphs, handle)
+                    # for each node, count out degrees
+                    out_degrees = [x[1] for x in list(graph.out_degree)]
+
+                    # get the fraction of nodes that are greater than 1 (1=1 of 0 out degree, 0= more than 1 out degree)
+                    out_degrees = [1 if x <= 1 else 0 for x in out_degrees]
+
+                    # get fraction
+                    deterministic_fraction = sum(out_degrees)/len(out_degrees)  # 0 is all deterministic
+
+                    # get the trajectory
+                    trajectory = networks[network][1]
+
+                    # count number of total bits flipped for the trajectory
+                    # count the number of bits flipped over time
+                    # also count the number of "determinism" flips over time
+                    bits_flipped = 0
+                    bit_flip_traj = []
+                    det_bit_flip_traj = []
+                    bw_ratio_traj = []
+                    edges = []
+                    trajectory = list(zip(trajectory, trajectory[1:]))
+
+                    for step in trajectory:
+
+                        # check to see if first state in step is already in the list of edges
+                        last_state_outcome = list(filter(lambda x: x[0] == step[0], edges))
+
+                        # if present, only take the most recent one
+                        if len(last_state_outcome) > 0:
+                            last_state_outcome = last_state_outcome[-1]
+
+                            # see if it is the same
+                            if last_state_outcome != step:
+                                det_bit_flip_traj.append(1)
+                            else:
+                                det_bit_flip_traj.append(0)
+
+                        else:
+                            det_bit_flip_traj.append(0)
+
+                        # save the step as a deterministic edge
+                        edges.append(step)
+
+                        # get the bit flips
+                        bits_flipped_step = 0
+                        for i, bit in enumerate(step[0]):
+
+                            if bit != step[1][i]:
+                                bits_flipped += 1
+                                bits_flipped_step += 1
+
+                        bit_flip_traj.append(bits_flipped_step)
+
+                        # finally, at each step, get the black-white ratio
+                        bw_ratio = [1 if x==1 else 0 for x in step[1]]
+                        bw_ratio = sum(bw_ratio)/len(bw_ratio)  # fraction of 1's
+                        bw_ratio_traj.append(bw_ratio)
+
+                    results[network]['deterministic_fraction'] = deterministic_fraction
+                    results[network]['bits_flipped'] = bits_flipped
+                    results[network]['bit_flip_traj'] = bit_flip_traj
+                    results[network]['det_bit_flip_traj'] = det_bit_flip_traj
+                    results[network]['bw_ratio_traj'] = bw_ratio_traj
+
+                # save to pickle file
+                with open('pickle_jar/results_temp_%0.2f_size_%d_trial_%d.p' % (temp, size, trial), 'wb') as handle:
+                    pickle.dump(results, handle)
 
 
 if __name__ == '__main__':
 
-    freeze_support()
+    #[process_graphs(temp) for temp in temps]
 
     # parallelize to make this faster
+    freeze_support()
     with Pool() as pool:
-        pool.starmap(run_statespaces, zip(temps, repeat(nsteps)))
+        pool.map(process_graphs, temps)
 
     quit()
 
+
 """
-# ============= Step 2: Look at the networks and the trajectories ==============
-
-# analyze the networks
-def process_graphs():
-
-    results = {}
-
-    for size in range(min_size, max_size+1):
-
-        results[size] = {}
-
-        # load in these pickle files
-        with open('pickle_jar/graphs_%d.p' % size, 'rb') as handle:
-
-            networks = pickle.load(handle)
-
-            # for each toplogy, get the fraction of nodes that have more than one out degree
-            # also count the total number of bit flips for the whole trajectory
-            for network in networks:
-
-                # get the topology
-                graph = networks[network][0]
-
-                # change multidigraph to digraph (remove self-loops and parallel edges)
-                graph = nx.DiGraph(graph)
-                graph.remove_edges_from(nx.selfloop_edges(graph))
-
-                # for each node, count out degrees
-                out_degrees = [x[1] for x in list(graph.out_degree)]
-
-                # get the fraction of nodes that are greater than 1 (1=1 of 0 out degree, 0= more than 1 out degree)
-                out_degrees = [1 if x <= 1 else 0 for x in out_degrees]
-
-                # get fraction
-                deterministic_fraction = sum(out_degrees)/len(out_degrees)  # 0 is all deterministic
-
-                # get the trajectory
-                trajectory = networks[network][1]
-
-                # count number of total bits flipped for the trajectory
-                bits_flipped = 0
-                trajectory = list(zip(trajectory, trajectory[1:]))
-                for step in trajectory:
-                    for i, bit in enumerate(step[0]):
-                        if bit != step[1][i]:
-                            bits_flipped += 1
-
-                results[size][network] = (deterministic_fraction, bits_flipped)
-
-    return results
-
-results = process_graphs()
-
-
 # ============= Step 3: Plot results ==============
 
 # Figure 1: distribution of determinism over state spaces

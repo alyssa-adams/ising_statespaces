@@ -1,7 +1,5 @@
 import numpy as np
 from numpy.random import rand
-import matplotlib.pyplot as plt
-
 
 
 # ----------------------------------------------------------------------
